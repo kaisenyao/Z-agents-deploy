@@ -1,4 +1,5 @@
 const http = require('node:http');
+const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT || 8787);
 const DEFAULT_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS || 30_000);
@@ -6,11 +7,21 @@ const QUOTE_TTL_MS = Number(process.env.MARKET_QUOTE_TTL_MS || 15_000);
 const CHART_TTL_MS = Number(process.env.MARKET_CHART_TTL_MS || 60_000);
 const METADATA_TTL_MS = Number(process.env.MARKET_METADATA_TTL_MS || 1_800_000);
 const SCREENER_TTL_MS = Number(process.env.MARKET_SCREENER_TTL_MS || 300_000);
+const SCREENER_STALE_MS = Number(process.env.MARKET_SCREENER_STALE_MS || 1_800_000);
+const SCREENER_REFRESH_INTERVAL_MS = Number(process.env.MARKET_SCREENER_REFRESH_INTERVAL_MS || SCREENER_STALE_MS);
 const OPTIONS_TTL_MS = Number(process.env.MARKET_OPTIONS_TTL_MS || 60_000);
 const YAHOO_TIMEOUT_MS = Number(process.env.YAHOO_TIMEOUT_MS || 15_000);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const DATABASE_URL = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || '';
 
 const cache = new Map();
+const screenerRefreshInFlight = new Map();
+const dbPool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
+    })
+  : null;
 
 const SCREENER_IDS = {
   stocks: {
@@ -26,6 +37,21 @@ const SCREENER_IDS = {
     day_gainers: 'day_gainers_cryptocurrencies',
   },
 };
+
+const SCREENER_DATASETS = [
+  ['stocks', 'most_actives'],
+  ['stocks', 'day_gainers'],
+  ['etfs', 'most_actives'],
+  ['etfs', 'day_gainers'],
+  ['crypto', 'most_actives'],
+  ['crypto', 'day_gainers'],
+  ['options', 'most_actives'],
+  ['options', 'day_gainers'],
+];
+
+const OPTIONS_UNDERLYING_LIMIT = 8;
+const OPTIONS_ROW_LIMIT = 100;
+const SCREENER_BATCH_SIZE = 100;
 
 function sendJson(res, status, payload) {
   res.statusCode = status;
@@ -123,6 +149,56 @@ function mapYahooQuoteToScreenerRow(quote, category) {
   };
 }
 
+function isValidOptionsUnderlying(symbol) {
+  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol);
+}
+
+function formatOptionContractName(underlyingSymbol, expirationDate, strike, optionType) {
+  const expiration = new Date(expirationDate);
+  const expirationLabel = Number.isFinite(expiration.getTime())
+    ? expiration.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    : expirationDate;
+  const strikeLabel = typeof strike === 'number' && Number.isFinite(strike) ? strike.toFixed(2).replace(/\.00$/, '') : '?';
+  return `${underlyingSymbol} ${expirationLabel} ${strikeLabel} ${optionType}`;
+}
+
+function toIsoDateString(value, fallback) {
+  const normalized = normalizeExpirationDate(value);
+  return normalized ? new Date(`${normalized}T00:00:00.000Z`).toISOString() : fallback;
+}
+
+function mapOptionContractToScreenerRow(contract, underlyingSymbol, fallbackExpirationDate, optionType) {
+  const symbol = String(contract?.contractSymbol || contract?.symbol || '').trim().toUpperCase();
+  if (!symbol) return null;
+
+  const strike = getNumericValue(contract?.strike);
+  const expirationDate = toIsoDateString(contract?.expiration ?? contract?.expirationDate, fallbackExpirationDate);
+  const price = getNumericValue(contract?.lastPrice ?? contract?.regularMarketPrice);
+  const change = getNumericValue(contract?.change ?? contract?.regularMarketChange);
+  const changePercent = getNumericValue(contract?.percentChange ?? contract?.regularMarketChangePercent);
+  const rawBid = contract?.bid;
+  const rawAsk = contract?.ask;
+  const bid = rawBid === null || rawBid === undefined || rawBid === '' ? null : getNumericValue(rawBid);
+  const ask = rawAsk === null || rawAsk === undefined || rawAsk === '' ? null : getNumericValue(rawAsk);
+  const volume = getNumericValue(contract?.volume);
+  const openInterest = getNumericValue(contract?.openInterest);
+
+  return {
+    symbol,
+    name: formatOptionContractName(underlyingSymbol, expirationDate, strike > 0 ? strike : null, optionType),
+    underlyingSymbol,
+    strike: strike > 0 ? strike : null,
+    expirationDate,
+    price: price > 0 ? price : null,
+    change: Number.isFinite(change) ? change : null,
+    changePercent: Number.isFinite(changePercent) ? changePercent : null,
+    bid: bid !== null && Number.isFinite(bid) ? bid : null,
+    ask: ask !== null && Number.isFinite(ask) ? ask : null,
+    volume: volume > 0 ? volume : null,
+    openInterest: openInterest > 0 ? openInterest : null,
+  };
+}
+
 function getCache(key) {
   const entry = cache.get(key);
   if (!entry || entry.expiresAt <= Date.now()) return null;
@@ -142,6 +218,58 @@ async function getOrFetch(key, ttlMs, fetcher) {
   if (cached !== null) return cached;
   const value = await fetcher();
   return setCache(key, value, ttlMs);
+}
+
+function toScreenerEnvelope(row) {
+  if (!row) return null;
+  return {
+    category: row.category,
+    tab: row.tab,
+    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : new Date(row.updated_at).toISOString(),
+    items: Array.isArray(row.items) ? row.items : [],
+  };
+}
+
+async function readScreenerCache(category, tab) {
+  if (!dbPool) return null;
+  const result = await dbPool.query(
+    'select category, tab, updated_at, items from market_screener_cache where category = $1 and tab = $2',
+    [category, tab],
+  );
+  return toScreenerEnvelope(result.rows[0]);
+}
+
+async function writeScreenerCache(envelope, status = 'ok', lastError = null) {
+  if (!dbPool) return;
+  await dbPool.query(
+    `insert into market_screener_cache
+      (category, tab, updated_at, items, provider, source_key, refresh_status, last_error, refreshed_at)
+     values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, now())
+     on conflict (category, tab) do update set
+      updated_at = excluded.updated_at,
+      items = excluded.items,
+      provider = excluded.provider,
+      source_key = excluded.source_key,
+      refresh_status = excluded.refresh_status,
+      last_error = excluded.last_error,
+      refreshed_at = now()`,
+    [
+      envelope.category,
+      envelope.tab,
+      envelope.updatedAt,
+      JSON.stringify(Array.isArray(envelope.items) ? envelope.items : []),
+      'yahoo',
+      envelope.category === 'options' ? 'derived-options-screener' : SCREENER_IDS[envelope.category]?.[envelope.tab] || null,
+      status,
+      lastError,
+    ],
+  );
+}
+
+function isScreenerStale(envelope) {
+  if (!envelope?.updatedAt) return true;
+  const updatedAtMs = new Date(envelope.updatedAt).getTime();
+  return !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > SCREENER_STALE_MS;
 }
 
 async function fetchJson(targetUrl) {
@@ -391,6 +519,42 @@ async function fetchYahooSearch(query) {
   });
 }
 
+async function fetchYahooScreenerQuotes(screenerId) {
+  const allQuotes = [];
+  let start = 0;
+  let total = Infinity;
+
+  while (start < total) {
+    const params = new URLSearchParams({
+      formatted: 'false',
+      scrIds: screenerId,
+      count: String(SCREENER_BATCH_SIZE),
+      start: String(start),
+    });
+    const data = await fetchJson(`https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?${params.toString()}`);
+    const result = data?.finance?.result?.[0] || {};
+    const quotes = Array.isArray(result?.quotes) ? result.quotes : [];
+    const responseTotal = Number(result?.total);
+    const responseCount = Number(result?.count);
+
+    allQuotes.push(...quotes);
+
+    if (!Number.isFinite(responseTotal) || responseTotal <= 0 || quotes.length === 0) {
+      break;
+    }
+
+    total = responseTotal;
+    start += Number.isFinite(responseCount) && responseCount > 0 ? responseCount : quotes.length;
+  }
+
+  const deduped = new Map();
+  allQuotes.forEach((quote) => {
+    const symbol = normalizeSymbol(quote?.symbol);
+    if (symbol && !deduped.has(symbol)) deduped.set(symbol, quote);
+  });
+  return [...deduped.values()];
+}
+
 function normalizeOptionContract(contract, fallbackExpiration, currency) {
   const expiration = normalizeExpirationDate(
     contract?.expiration ??
@@ -597,8 +761,117 @@ async function findScreenerFallback(symbol) {
   return null;
 }
 
+async function fetchProviderScreener(category, tab) {
+  if (category === 'options') {
+    const stockScreener = await fetchProviderScreener('stocks', tab);
+    const underlyings = stockScreener.items
+      .map((item) => ({
+        ticker: normalizeSymbol(item?.ticker),
+        name: String(item?.name || item?.ticker || 'Unknown'),
+      }))
+      .filter((item) => item.ticker && isValidOptionsUnderlying(item.ticker))
+      .slice(0, OPTIONS_UNDERLYING_LIMIT);
+
+    const chains = await Promise.allSettled(underlyings.map(async (underlying) => ({
+      underlying,
+      chain: await fetchOptionsChain(underlying.ticker),
+    })));
+
+    const rows = chains.flatMap((result) => {
+      if (result.status !== 'fulfilled') return [];
+      const { underlying, chain } = result.value;
+      const expirationDate = Array.isArray(chain?.expirations) && chain.expirations.length > 0
+        ? new Date(`${chain.expirations[0]}T00:00:00.000Z`).toISOString()
+        : new Date().toISOString();
+      const calls = Array.isArray(chain?.calls) ? chain.calls : [];
+      const puts = Array.isArray(chain?.puts) ? chain.puts : [];
+
+      return [
+        ...calls.map((contract) => mapOptionContractToScreenerRow(contract, underlying.ticker, expirationDate, 'Call')),
+        ...puts.map((contract) => mapOptionContractToScreenerRow(contract, underlying.ticker, expirationDate, 'Put')),
+      ].filter(Boolean);
+    });
+
+    const sorted = [...rows].sort((left, right) => {
+      if (tab === 'most_actives') {
+        const volumeDiff = (right.volume || 0) - (left.volume || 0);
+        if (volumeDiff !== 0) return volumeDiff;
+        return (right.openInterest || 0) - (left.openInterest || 0);
+      }
+
+      const gainDiff = (right.changePercent || -Infinity) - (left.changePercent || -Infinity);
+      if (gainDiff !== 0) return gainDiff;
+      return (right.volume || 0) - (left.volume || 0);
+    });
+
+    return {
+      category,
+      tab,
+      updatedAt: new Date().toISOString(),
+      items: sorted.slice(0, OPTIONS_ROW_LIMIT),
+    };
+  }
+
+  const screenerId = SCREENER_IDS[category]?.[tab];
+  if (!screenerId) {
+    const error = new Error('Invalid category');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const quotes = await fetchYahooScreenerQuotes(screenerId);
+
+  return {
+    category,
+    tab,
+    updatedAt: new Date().toISOString(),
+    items: quotes.map((quote) => mapYahooQuoteToScreenerRow(quote, category)),
+  };
+}
+
+async function refreshScreenerCache(category, tab) {
+  const cacheKey = `${category}:${tab}`;
+  const existing = screenerRefreshInFlight.get(cacheKey);
+  if (existing) return existing;
+
+  const request = (async () => {
+    try {
+      const refreshed = await fetchProviderScreener(category, tab);
+      if (!Array.isArray(refreshed.items) || refreshed.items.length === 0) {
+        throw new Error(`Provider returned empty screener for ${category}/${tab}`);
+      }
+
+      await writeScreenerCache(refreshed);
+      setCache(`screener:${category}:${tab}`, refreshed, SCREENER_TTL_MS);
+      return refreshed;
+    } catch (error) {
+      if (dbPool) {
+        await dbPool.query(
+          `update market_screener_cache
+           set refresh_status = $3, last_error = $4
+           where category = $1 and tab = $2`,
+          [category, tab, 'error', error?.message || 'Unknown refresh error'],
+        ).catch(() => {});
+      }
+      throw error;
+    } finally {
+      screenerRefreshInFlight.delete(cacheKey);
+    }
+  })();
+
+  screenerRefreshInFlight.set(cacheKey, request);
+  return request;
+}
+
+function refreshScreenerCacheInBackground(category, tab) {
+  refreshScreenerCache(category, tab).catch((error) => {
+    console.error(`[Screener cache] refresh failed for ${category}/${tab}:`, error?.message || error);
+  });
+}
+
 async function fetchScreener(category, tab) {
   const validTabs = new Set(['most_actives', 'day_gainers']);
+  const validCategories = new Set(['stocks', 'etfs', 'crypto', 'options']);
   const normalizedCategory = String(category || '').trim().toLowerCase();
   const normalizedTab = String(tab || '').trim().toLowerCase();
 
@@ -608,45 +881,43 @@ async function fetchScreener(category, tab) {
     throw error;
   }
 
-  if (normalizedCategory === 'options') {
-    return {
-      category: 'options',
-      tab: normalizedTab,
-      updatedAt: new Date().toISOString(),
-      items: [],
-    };
-  }
-
-  const screenerId = SCREENER_IDS[normalizedCategory]?.[normalizedTab];
-  if (!screenerId) {
+  if (!validCategories.has(normalizedCategory)) {
     const error = new Error('Invalid category');
     error.statusCode = 400;
     throw error;
   }
 
   const cacheKey = `screener:${normalizedCategory}:${normalizedTab}`;
-  return getOrFetch(cacheKey, SCREENER_TTL_MS, async () => {
-    const params = new URLSearchParams({
-      formatted: 'false',
-      scrIds: screenerId,
-      count: '100',
-      start: '0',
-    });
-    const data = await fetchJson(`https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?${params.toString()}`);
-    const quotes = Array.isArray(data?.finance?.result?.[0]?.quotes) ? data.finance.result[0].quotes : [];
-    const deduped = new Map();
-    quotes.forEach((quote) => {
-      const symbol = normalizeSymbol(quote?.symbol);
-      if (symbol && !deduped.has(symbol)) deduped.set(symbol, quote);
-    });
+  const cachedMemory = getCache(cacheKey);
+  if (cachedMemory !== null) return cachedMemory;
 
+  const cachedDb = await readScreenerCache(normalizedCategory, normalizedTab);
+  if (cachedDb) {
+    const isEmptyOptionsCache =
+      normalizedCategory === 'options' &&
+      (!Array.isArray(cachedDb.items) || cachedDb.items.length === 0);
+
+    if (!isEmptyOptionsCache) {
+      setCache(cacheKey, cachedDb, SCREENER_TTL_MS);
+      if (isScreenerStale(cachedDb)) {
+        refreshScreenerCacheInBackground(normalizedCategory, normalizedTab);
+      }
+      return cachedDb;
+    }
+  }
+
+  try {
+    const refreshed = await refreshScreenerCache(normalizedCategory, normalizedTab);
+    return refreshed;
+  } catch (error) {
+    console.error(`[Screener cache] initial refresh failed for ${normalizedCategory}/${normalizedTab}:`, error?.message || error);
     return {
       category: normalizedCategory,
       tab: normalizedTab,
       updatedAt: new Date().toISOString(),
-      items: [...deduped.values()].map((quote) => mapYahooQuoteToScreenerRow(quote, normalizedCategory)),
+      items: [],
     };
-  });
+  }
 }
 
 async function handleRequest(req, res) {
@@ -772,6 +1043,20 @@ const server = http.createServer((req, res) => {
   });
 });
 
+function refreshAllScreenersInBackground() {
+  if (!dbPool) return;
+  SCREENER_DATASETS.forEach(([category, tab]) => {
+    refreshScreenerCacheInBackground(category, tab);
+  });
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`z-market-api listening on 0.0.0.0:${PORT}`);
+  if (dbPool) {
+    console.log('z-market-api screener cache persistence enabled');
+    refreshAllScreenersInBackground();
+    setInterval(refreshAllScreenersInBackground, SCREENER_REFRESH_INTERVAL_MS);
+  } else {
+    console.warn('z-market-api screener cache persistence disabled: DATABASE_URL or SUPABASE_DB_URL is not set');
+  }
 });
