@@ -1,4 +1,5 @@
 import { appApi } from './apiBase';
+import { MARKET_API_ENABLED } from './marketApiAvailability';
 
 export type ResearchScreenerCategory = 'stocks' | 'etfs' | 'crypto' | 'options';
 export type ResearchScreenerTab = 'most_actives' | 'day_gainers';
@@ -14,6 +15,15 @@ export async function fetchCachedResearchScreener<T>(
   category: ResearchScreenerCategory,
   tab: ResearchScreenerTab,
 ): Promise<CachedResearchScreenerResponse<T>> {
+  if (!MARKET_API_ENABLED) {
+    return {
+      category,
+      tab,
+      updatedAt: new Date().toISOString(),
+      items: [],
+    };
+  }
+
   const params = new URLSearchParams({
     category,
     tab,

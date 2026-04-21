@@ -1,7 +1,8 @@
 import { Navigate, Outlet } from 'react-router';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/SupabaseAuthContext';
 
 export function ProtectedRoute() {
-  const { email } = useAuth();
-  return email ? <Outlet /> : <Navigate to="/login" replace />;
+  const { session, loading } = useAuth();
+  if (loading) return null;
+  return session ? <Outlet /> : <Navigate to="/login" replace />;
 }

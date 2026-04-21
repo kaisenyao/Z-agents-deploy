@@ -616,7 +616,9 @@ export async function sendMessageToGraph(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to send message: ${response.statusText}`);
+    const errorText = await response.text().catch(() => '');
+    const details = errorText.trim() || response.statusText || 'No response body';
+    throw new Error(`LangGraph stream failed (${response.status}): ${details}`);
   }
 
   const reader = response.body?.getReader();

@@ -1,26 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Lock, Users } from 'lucide-react';
+import { Camera, Lock } from 'lucide-react';
 import { useProfile } from '../context/ProfileContext';
-import { useAuth } from '../context/AuthContext';
-import { appApi } from '../lib/apiBase';
-
-interface ManagedUser {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  status: 'pending' | 'approved' | 'rejected';
-  role: string;
-}
+import { useAuth } from '../context/SupabaseAuthContext';
+import { supabase } from '../lib/supabase';
 
 export function AccountSettings() {
   const { profile, setProfile, saveProfile } = useProfile();
-  const { email: authEmail, user, token, updateUser } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
-  const [showUserAccess, setShowUserAccess] = useState(false);
-  const [adminActionId, setAdminActionId] = useState<string | null>(null);
-  const [editEmail, setEditEmail] = useState(authEmail ?? '');
+  const { user } = useAuth();
+  const [editEmail, setEditEmail] = useState(user?.email ?? '');
   const [profileError, setProfileError] = useState('');
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
@@ -31,44 +18,17 @@ export function AccountSettings() {
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Seed name fields from backend user on first render
   useEffect(() => {
     if (!user) return;
+    const metadata = user.user_metadata || {};
     setProfile(prev => ({
       ...prev,
-      firstName: user.first_name || prev.firstName,
-      lastName:  user.last_name  || prev.lastName,
+      firstName: typeof metadata.first_name === 'string' ? metadata.first_name : prev.firstName,
+      lastName:  typeof metadata.last_name === 'string' ? metadata.last_name : prev.lastName,
     }));
     if (user.email) setEditEmail(user.email);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!isAdmin || !token) return;
-    fetch(appApi('/admin/users'), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : [])
-      .then(setManagedUsers)
-      .catch(() => { /* silently ignore fetch errors */ });
-  }, [isAdmin, token]);
-
-  const handleAdminAction = async (id: string, action: 'approve' | 'pend') => {
-    if (!token) return;
-    setAdminActionId(id);
-    try {
-      const res = await fetch(appApi(`/admin/users/${id}/${action}`), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const newStatus = action === 'approve' ? 'approved' : 'pending';
-        setManagedUsers(prev => prev.map(u => u.id === id ? { ...u, status: newStatus } : u));
-      }
-    } catch { /* ignore */ } finally {
-      setAdminActionId(null);
-    }
-  };
+  }, [user]);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -100,34 +60,26 @@ export function AccountSettings() {
       setProfileError('Invalid email address.');
       return;
     }
-    if (!token) {
+    if (!user) {
       setProfileError('Session expired. Please log in again.');
       return;
     }
 
     setProfileSubmitting(true);
     try {
-      const res = await fetch(appApi('/account/update-profile'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const { data, error } = await supabase.auth.updateUser({
+        email: trimmedEmail,
+        data: {
           first_name: trimmedFirst,
-          last_name:  trimmedLast,
-          email:      trimmedEmail,
-        }),
+          last_name: trimmedLast,
+        },
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setProfileError(data.error || 'Failed to save profile.');
+      if (error) {
+        setProfileError(error.message || 'Failed to save profile.');
         return;
       }
-      // Persist locally and update context only after server confirms
-      saveProfile({ ...profile, firstName: data.first_name, lastName: data.last_name });
-      updateUser({ first_name: data.first_name, last_name: data.last_name, email: data.email });
-      setEditEmail(data.email);
+      saveProfile({ ...profile, firstName: trimmedFirst, lastName: trimmedLast });
+      setEditEmail(data.user.email || trimmedEmail);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch {
@@ -160,24 +112,24 @@ export function AccountSettings() {
       setPasswordError('Password must be at least 8 characters.');
       return;
     }
-    if (!token) return;
+    if (!user?.email) return;
 
     setPasswordSubmitting(true);
     try {
-      const res = await fetch(appApi('/account/change-password'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          current_password: passwords.current,
-          new_password: passwords.newPw,
-        }),
+      const current = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: passwords.current,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setPasswordError(data.error || 'Something went wrong.');
+      if (current.error) {
+        setPasswordError('Current password is incorrect.');
+        return;
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        password: passwords.newPw,
+      });
+      if (error) {
+        setPasswordError(error.message || 'Something went wrong.');
         return;
       }
       setPasswordSuccess(true);
@@ -347,74 +299,6 @@ export function AccountSettings() {
             </div>
           )}
         </div>
-
-        {/* User Access — only visible to admins */}
-        {isAdmin && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-slate-100 mb-4">User Access</h2>
-              </div>
-              {!showUserAccess && (
-                <button
-                  onClick={() => setShowUserAccess(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-300 transition-colors"
-                >
-                  <Users className="w-4 h-4" />
-                  Manage Access
-                </button>
-              )}
-            </div>
-
-            {showUserAccess && (<div className="mt-5">
-            {managedUsers.length === 0 ? (
-              <p className="text-sm text-slate-500">No users found.</p>
-            ) : (
-              <div className="space-y-2">
-                {managedUsers.map(u => {
-                  const isSelf = u.id === user?.id;
-                  return (
-                    <div
-                      key={u.id}
-                      className="flex items-center justify-between gap-4 bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm text-slate-100 truncate">
-                          {u.first_name} {u.last_name}
-                        </p>
-                        <p className="text-xs text-slate-500 truncate">{u.email}</p>
-                      </div>
-                      <div className="flex items-center flex-shrink-0">
-                        {!isSelf && (u.status === 'approved' || u.status === 'pending') && (
-                          <button
-                            onClick={() => handleAdminAction(u.id, u.status === 'approved' ? 'pend' : 'approve')}
-                            disabled={adminActionId === u.id}
-                            className={`w-24 py-1.5 text-xs font-medium text-white text-center rounded-md transition-colors disabled:opacity-50 ${
-                              u.status === 'approved'
-                                ? 'bg-emerald-600 hover:bg-emerald-500'
-                                : 'bg-slate-500 hover:bg-slate-400'
-                            }`}
-                          >
-                            {adminActionId === u.id ? '…' : u.status === 'approved' ? 'Approved' : 'Pending'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <div className="flex justify-end pt-4">
-              <button
-                onClick={() => setShowUserAccess(false)}
-                className="px-4 py-2.5 text-sm text-slate-400 hover:text-slate-100 transition-colors"
-              >
-                Done
-              </button>
-            </div>
-            </div>)}
-          </div>
-        )}
       </div>
     </div>
   );

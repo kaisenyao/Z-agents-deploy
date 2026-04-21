@@ -1,13 +1,13 @@
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
-import { AuthProvider } from './context/AuthContext';
+import { SupabaseAuthProvider } from './context/SupabaseAuthContext';
 import { MarketQuoteProvider } from './context/MarketQuoteContext';
 import { TradeProvider } from './context/TradeContext';
 import { ProfileProvider } from './context/ProfileContext';
 
 export default function App() {
   return (
-    <AuthProvider>
+    <SupabaseAuthProvider>
       <ProfileProvider>
         <MarketQuoteProvider>
           <TradeProvider>
@@ -15,6 +15,6 @@ export default function App() {
           </TradeProvider>
         </MarketQuoteProvider>
       </ProfileProvider>
-    </AuthProvider>
+    </SupabaseAuthProvider>
   );
 }

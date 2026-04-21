@@ -1,12 +1,10 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { useAuth } from '../context/AuthContext';
-import type { AuthUser } from '../context/AuthContext';
-import { appApi } from '../lib/apiBase';
+import { useNavigate } from 'react-router';
+import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
 
 export function Login() {
-  const { login } = useAuth();
+  const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,39 +31,29 @@ export function Login() {
 
     setSubmitting(true);
     try {
-      const res = await fetch(appApi('/login'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: normalized, password }),
-      });
+      await signIn(normalized, password);
+      navigate('/chat', { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-      if (res.status === 401) {
-        setError('Incorrect email or password.');
-        return;
-      }
+  const handleSignup = async () => {
+    setError('');
+    const normalized = email.toLowerCase().trim();
+    if (!normalized || !password) {
+      setError('Enter an email address and password.');
+      return;
+    }
 
-      if (res.status === 403) {
-        const data = await res.json();
-        if (data.error === 'pending') {
-          setError('Your account is under review.');
-        } else if (data.error === 'rejected') {
-          setError('Your request was not approved.');
-        } else {
-          setError('Access denied.');
-        }
-        return;
-      }
-
-      if (!res.ok) {
-        setError('Something went wrong. Please try again.');
-        return;
-      }
-
-      const data: { token: string; user: AuthUser } = await res.json();
-      login(data.token, data.user);
-      navigate('/dashboard', { replace: true });
-    } catch {
-      setError('Something went wrong. Please try again.');
+    setSubmitting(true);
+    try {
+      await signUp(normalized, password);
+      navigate('/chat', { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -115,15 +103,14 @@ export function Login() {
               {submitting ? 'Signing in…' : 'Sign in'}
             </button>
 
-            <p className="text-center text-xs text-slate-500">
-              Don&apos;t have an account?{' '}
-              <Link
-                to="/signup"
-                className="text-slate-300 transition-colors hover:text-slate-100 hover:underline"
-              >
-                Sign up
-              </Link>
-            </p>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleSignup}
+              className="w-full px-5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed text-slate-100 text-sm font-medium rounded-lg transition-colors"
+            >
+              Sign up
+            </button>
           </form>
         </div>
       </div>

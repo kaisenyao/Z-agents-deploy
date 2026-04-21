@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
-import { Link } from 'react-router';
-import { appApi } from '../lib/apiBase';
+import { Link, useNavigate } from 'react-router';
+import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
 
 interface FormState {
@@ -17,25 +17,6 @@ interface FormErrors {
   email?: string;
   password?: string;
   confirmPassword?: string;
-}
-
-async function handleSignup(data: FormState): Promise<void> {
-  const res = await fetch(appApi('/signup'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      first_name: data.firstName,
-      last_name: data.lastName,
-      email: data.email.toLowerCase().trim(),
-      password: data.password,
-    }),
-  });
-  if (res.status === 409) {
-    throw new Error('An account with this email already exists.');
-  }
-  if (!res.ok) {
-    throw new Error('Something went wrong. Please try again.');
-  }
 }
 
 function validateForm(data: FormState): FormErrors {
@@ -61,6 +42,8 @@ function validateForm(data: FormState): FormErrors {
 }
 
 export function Signup() {
+  const { signUp } = useAuth();
+  const navigate = useNavigate();
   const [form, setForm] = useState<FormState>({
     firstName: '',
     lastName: '',
@@ -87,8 +70,9 @@ export function Signup() {
 
     setSubmitting(true);
     try {
-      await handleSignup(form);
+      await signUp(form.email.toLowerCase().trim(), form.password);
       setSuccess(true);
+      navigate('/chat', { replace: true });
     } catch (err) {
       setErrors({ email: err instanceof Error ? err.message : 'Something went wrong. Please try again.' });
     } finally {

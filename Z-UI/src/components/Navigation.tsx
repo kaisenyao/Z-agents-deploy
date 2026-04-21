@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { User, Settings, LogOut, ArrowRightLeft, MessageSquare } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useProfile } from '../context/ProfileContext';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
 
 const PRIMARY_NAV_ITEMS = [
@@ -22,14 +22,14 @@ export function Navigation() {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile } = useProfile();
-  const { logout } = useAuth();
+  const { signOut } = useAuth();
   const isResearchActive = location.pathname.startsWith('/research');
   const [isAccountDropdownOpen, setIsAccountDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setIsAccountDropdownOpen(false);
-    logout();
+    await signOut();
     navigate('/login', { replace: true });
   };
 

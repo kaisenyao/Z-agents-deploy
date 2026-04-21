@@ -1,4 +1,5 @@
 import { appApi } from './apiBase';
+import { MARKET_API_ENABLED } from './marketApiAvailability';
 
 export interface YahooFinanceQuote {
   symbol: string;
@@ -31,6 +32,8 @@ export async function fetchStockData(
   range: string = "1mo",
   interval: string = "1d"
 ): Promise<YahooFinanceChart | null> {
+  if (!MARKET_API_ENABLED) return null;
+
   try {
     const params = new URLSearchParams({
       symbol: ticker.trim().toUpperCase(),
@@ -57,6 +60,8 @@ export async function fetchStockDataByWindow(
   period2: number,
   interval: string = "1d"
 ): Promise<YahooFinanceChart | null> {
+  if (!MARKET_API_ENABLED) return null;
+
   try {
     const params = new URLSearchParams({
       symbol: ticker.trim().toUpperCase(),
@@ -97,6 +102,7 @@ export function formatChartDataForRecharts(chartData: YahooFinanceChart | null) 
 
 export async function fetchYahooQuotes(symbols: string[]): Promise<any[]> {
   if (!symbols.length) return [];
+  if (!MARKET_API_ENABLED) return [];
 
   try {
     const cleanedSymbols = symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean);
@@ -120,6 +126,7 @@ export async function fetchYahooQuotes(symbols: string[]): Promise<any[]> {
 export async function fetchLiveOptionsChain(symbol: string, date?: string): Promise<any | null> {
   const cleanedSymbol = symbol.trim().toUpperCase();
   if (!cleanedSymbol) return null;
+  if (!MARKET_API_ENABLED) return null;
 
   try {
     const params = new URLSearchParams({ symbol: cleanedSymbol });
@@ -167,6 +174,7 @@ export async function fetchYahooQuoteSummary(symbol: string): Promise<any | null
 async function fetchMarketMetadata(symbol: string): Promise<any | null> {
   const cleanedSymbol = symbol.trim().toUpperCase();
   if (!cleanedSymbol) return null;
+  if (!MARKET_API_ENABLED) return null;
 
   const cached = metadataResponseCache.get(cleanedSymbol);
   if (cached && cached.expiresAt > Date.now()) {
@@ -215,6 +223,7 @@ export async function fetchYahooQuotePageMetrics(symbol: string): Promise<{ mark
 
 export async function searchYahooSymbols(query: string): Promise<any[]> {
   if (!query.trim()) return [];
+  if (!MARKET_API_ENABLED) return [];
 
   try {
     const params = new URLSearchParams({ query });

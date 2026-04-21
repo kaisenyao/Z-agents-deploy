@@ -1,4 +1,5 @@
 import { appApi } from './apiBase';
+import { MARKET_API_ENABLED } from './marketApiAvailability';
 
 export type MarketScreenerCategory = 'stocks' | 'etfs' | 'crypto' | 'options';
 export type MarketScreenerTab = 'most_actives' | 'day_gainers';
@@ -21,6 +22,15 @@ export async function fetchMarketScreener<T>(
   category: MarketScreenerCategory,
   tab: MarketScreenerTab,
 ): Promise<MarketScreenerResponse<T>> {
+  if (!MARKET_API_ENABLED) {
+    return {
+      category,
+      tab,
+      updatedAt: new Date().toISOString(),
+      items: [],
+    };
+  }
+
   const params = new URLSearchParams({ category, tab });
   const response = await fetch(appApi(`/market/screener?${params.toString()}`));
   if (!response.ok) {
@@ -33,6 +43,8 @@ export async function searchMarketSymbols(
   query: string,
   category: MarketScreenerCategory,
 ): Promise<MarketSearchResult[]> {
+  if (!MARKET_API_ENABLED) return [];
+
   const params = new URLSearchParams({ query, category });
   const response = await fetch(appApi(`/market/search?${params.toString()}`));
   if (!response.ok) {

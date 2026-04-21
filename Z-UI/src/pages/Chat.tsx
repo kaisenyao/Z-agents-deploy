@@ -1304,13 +1304,17 @@ export function Chat() {
         if (!isMountedRef.current) return '';
         // Push error card directly — no placeholder to resolve
         const errorTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const errorDetail = err instanceof Error ? err.message : String(err);
+        const shortErrorDetail = errorDetail.length > 1000
+          ? `${errorDetail.slice(0, 1000)}...`
+          : errorDetail;
         setChatSessions(prev => prev.map(chat => {
           if (chat.id !== capturedSessionId) return chat;
           return {
             ...chat,
             messages: [...chat.messages, {
               sender: 'System',
-              content: `Connection to LangGraph server failed (${graphId}). Please ensure \`langgraph dev\` is running.`,
+              content: `Connection to LangGraph server failed (${graphId}).\n\nBackend error:\n${shortErrorDetail}`,
               timestamp: errorTimestamp,
             }],
             timestamp: new Date().toISOString(),

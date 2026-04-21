@@ -1,4 +1,5 @@
 import { appApi } from '../lib/apiBase';
+import { MARKET_API_ENABLED } from '../lib/marketApiAvailability';
 
 export interface HistoricalPricePoint {
   timestamp: number;
@@ -41,6 +42,8 @@ export async function fetchHistoricalPrices(
   symbol: string,
   input: string | FetchHistoricalPricesOptions,
 ): Promise<HistoricalPricePoint[]> {
+  if (!MARKET_API_ENABLED) return [];
+
   const yahooSymbol = toYahooHistoricalSymbol(symbol);
   const request: FetchHistoricalPricesOptions = typeof input === 'string'
     ? { range: input, interval: '1d', useAdjustedClose: false }
