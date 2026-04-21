@@ -12,8 +12,12 @@ const SCREENER_REFRESH_INTERVAL_MS = Number(process.env.MARKET_SCREENER_REFRESH_
 const OPTIONS_TTL_MS = Number(process.env.MARKET_OPTIONS_TTL_MS || 60_000);
 const YAHOO_TIMEOUT_MS = Number(process.env.YAHOO_TIMEOUT_MS || 15_000);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
-const DATABASE_URL = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || '';
+const DATABASE_URL = process.env.SUPABASE_DB_URL;
+if (!DATABASE_URL) {
+  throw new Error('SUPABASE_DB_URL is required and DATABASE_URL is ignored');
+}
 const YAHOO_FINANCE_BASE_URL = 'https://query1.finance.yahoo.com';
+const DATABASE_HOST = DATABASE_URL ? new URL(DATABASE_URL).hostname : '';
 
 const cache = new Map();
 const screenerRefreshInFlight = new Map();
@@ -233,38 +237,47 @@ function toScreenerEnvelope(row) {
 
 async function readScreenerCache(category, tab) {
   if (!dbPool) return null;
-  const result = await dbPool.query(
-    'select category, tab, updated_at, items from market_screener_cache where category = $1 and tab = $2',
-    [category, tab],
-  );
+  let result;
+  try {
+    result = await dbPool.query(
+      'select category, tab, updated_at, items from market_screener_cache where category = $1 and tab = $2',
+      [category, tab],
+    );
+  } catch (error) {
+    throw new Error(`Database screener cache read failed host=${DATABASE_HOST || 'unset'} category=${category} tab=${tab}: ${error?.message || 'Unknown database error'}`);
+  }
   return toScreenerEnvelope(result.rows[0]);
 }
 
 async function writeScreenerCache(envelope, status = 'ok', lastError = null) {
   if (!dbPool) return;
-  await dbPool.query(
-    `insert into market_screener_cache
-      (category, tab, updated_at, items, provider, source_key, refresh_status, last_error, refreshed_at)
-     values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, now())
-     on conflict (category, tab) do update set
-      updated_at = excluded.updated_at,
-      items = excluded.items,
-      provider = excluded.provider,
-      source_key = excluded.source_key,
-      refresh_status = excluded.refresh_status,
-      last_error = excluded.last_error,
-      refreshed_at = now()`,
-    [
-      envelope.category,
-      envelope.tab,
-      envelope.updatedAt,
-      JSON.stringify(Array.isArray(envelope.items) ? envelope.items : []),
-      'yahoo',
-      envelope.category === 'options' ? 'derived-options-screener' : SCREENER_IDS[envelope.category]?.[envelope.tab] || null,
-      status,
-      lastError,
-    ],
-  );
+  try {
+    await dbPool.query(
+      `insert into market_screener_cache
+        (category, tab, updated_at, items, provider, source_key, refresh_status, last_error, refreshed_at)
+       values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, now())
+       on conflict (category, tab) do update set
+        updated_at = excluded.updated_at,
+        items = excluded.items,
+        provider = excluded.provider,
+        source_key = excluded.source_key,
+        refresh_status = excluded.refresh_status,
+        last_error = excluded.last_error,
+        refreshed_at = now()`,
+      [
+        envelope.category,
+        envelope.tab,
+        envelope.updatedAt,
+        JSON.stringify(Array.isArray(envelope.items) ? envelope.items : []),
+        'yahoo',
+        envelope.category === 'options' ? 'derived-options-screener' : SCREENER_IDS[envelope.category]?.[envelope.tab] || null,
+        status,
+        lastError,
+      ],
+    );
+  } catch (error) {
+    throw new Error(`Database screener cache write failed host=${DATABASE_HOST || 'unset'} category=${envelope.category} tab=${envelope.tab}: ${error?.message || 'Unknown database error'}`);
+  }
 }
 
 function isScreenerStale(envelope) {
