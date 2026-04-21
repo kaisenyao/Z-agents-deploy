@@ -13,6 +13,7 @@ const OPTIONS_TTL_MS = Number(process.env.MARKET_OPTIONS_TTL_MS || 60_000);
 const YAHOO_TIMEOUT_MS = Number(process.env.YAHOO_TIMEOUT_MS || 15_000);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const DATABASE_URL = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || '';
+const YAHOO_FINANCE_BASE_URL = 'https://query1.finance.yahoo.com';
 
 const cache = new Map();
 const screenerRefreshInFlight = new Map();
@@ -273,23 +274,57 @@ function isScreenerStale(envelope) {
 }
 
 async function fetchJson(targetUrl) {
+  const parsedUrl = new URL(targetUrl);
+  if (parsedUrl.hostname === 'base') {
+    throw new Error(`Invalid provider URL hostname "base": ${targetUrl}`);
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), YAHOO_TIMEOUT_MS);
   try {
-    const response = await fetch(targetUrl, {
-      signal: controller.signal,
-      headers: {
-        'Accept': 'application/json,text/plain,*/*',
-        'User-Agent': 'Mozilla/5.0 z-market-api/0.1',
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`Yahoo request failed (${response.status} ${response.statusText})`);
+    let response;
+    try {
+      response = await fetch(targetUrl, {
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json,text/plain,*/*',
+          'User-Agent': 'Mozilla/5.0 z-market-api/0.1',
+        },
+      });
+    } catch (error) {
+      console.error(`[Provider fetch] request failed url=${targetUrl} error=${error?.name || 'Error'}: ${error?.message || 'Unknown error'}`);
+      throw error;
     }
-    return response.json();
+
+    const responseText = await response.text();
+    if (!response.ok) {
+      const snippet = responseText.slice(0, 500);
+      console.error(`[Provider fetch] non-OK url=${targetUrl} status=${response.status} ${response.statusText} body=${snippet}`);
+      throw new Error(`Yahoo request failed (${response.status} ${response.statusText}) for ${targetUrl}: ${snippet}`);
+    }
+
+    try {
+      return JSON.parse(responseText);
+    } catch (error) {
+      const snippet = responseText.slice(0, 500);
+      console.error(`[Provider fetch] invalid JSON url=${targetUrl} error=${error?.name || 'Error'}: ${error?.message || 'Unknown error'} body=${snippet}`);
+      throw error;
+    }
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function yahooUrl(pathname, params) {
+  const url = new URL(pathname, YAHOO_FINANCE_BASE_URL);
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    }
+  }
+  return url.toString();
 }
 
 async function fetchYahooQuotes(symbols) {
@@ -306,8 +341,7 @@ async function fetchYahooQuotes(symbols) {
     const results = [];
     for (const chunk of chunks) {
       try {
-        const params = new URLSearchParams({ symbols: chunk.join(',') });
-        const data = await fetchJson(`https://query1.finance.yahoo.com/v7/finance/quote?${params.toString()}`);
+        const data = await fetchJson(yahooUrl('/v7/finance/quote', { symbols: chunk.join(',') }));
         const quotes = Array.isArray(data?.quoteResponse?.result) ? data.quoteResponse.result : [];
         results.push(...quotes);
       } catch {
@@ -479,26 +513,26 @@ async function fetchYahooChart(symbol, request) {
   const cacheKey = `chart:${JSON.stringify({ symbol: cleanedSymbol, ...request })}`;
   return getOrFetch(cacheKey, CHART_TTL_MS, async () => {
     const encodedSymbol = encodeURIComponent(cleanedSymbol);
-    const params = new URLSearchParams({
+    const params = {
       interval: request.interval || '1d',
       includePrePost: 'false',
       events: 'div,splits',
-    });
+    };
 
     if (Number.isFinite(request.period1) && Number.isFinite(request.period2)) {
-      params.set('period1', String(Math.floor(request.period1)));
-      params.set('period2', String(Math.floor(request.period2)));
+      params.period1 = String(Math.floor(request.period1));
+      params.period2 = String(Math.floor(request.period2));
     } else if (request.startDate && request.endDate) {
       const start = toUnixSeconds(request.startDate);
       const end = toUnixSeconds(request.endDate, { endOfDay: true });
       if (start === null || end === null || end <= start) return null;
-      params.set('period1', String(start));
-      params.set('period2', String(end));
+      params.period1 = String(start);
+      params.period2 = String(end);
     } else {
-      params.set('range', request.range || '1mo');
+      params.range = request.range || '1mo';
     }
 
-    const data = await fetchJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?${params.toString()}`);
+    const data = await fetchJson(yahooUrl(`/v8/finance/chart/${encodedSymbol}`, params));
     return data?.chart?.result?.[0] || null;
   });
 }
@@ -509,12 +543,11 @@ async function fetchYahooSearch(query) {
 
   const cacheKey = `search:${trimmed.toLowerCase()}`;
   return getOrFetch(cacheKey, QUOTE_TTL_MS, async () => {
-    const params = new URLSearchParams({
+    const data = await fetchJson(yahooUrl('/v1/finance/search', {
       q: trimmed,
       quotesCount: '10',
       newsCount: '0',
-    });
-    const data = await fetchJson(`https://query1.finance.yahoo.com/v1/finance/search?${params.toString()}`);
+    }));
     return Array.isArray(data?.quotes) ? data.quotes.filter((quote) => quote?.symbol) : [];
   });
 }
@@ -525,13 +558,12 @@ async function fetchYahooScreenerQuotes(screenerId) {
   let total = Infinity;
 
   while (start < total) {
-    const params = new URLSearchParams({
+    const data = await fetchJson(yahooUrl('/v1/finance/screener/predefined/saved', {
       formatted: 'false',
       scrIds: screenerId,
       count: String(SCREENER_BATCH_SIZE),
       start: String(start),
-    });
-    const data = await fetchJson(`https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?${params.toString()}`);
+    }));
     const result = data?.finance?.result?.[0] || {};
     const quotes = Array.isArray(result?.quotes) ? result.quotes : [];
     const responseTotal = Number(result?.total);
@@ -603,7 +635,7 @@ async function fetchOptionsChain(symbol, requestedDate) {
   return getOrFetch(cacheKey, OPTIONS_TTL_MS, async () => {
     try {
       const encodedSymbol = encodeURIComponent(cleanedSymbol);
-      const metadata = await fetchJson(`https://query1.finance.yahoo.com/v7/finance/options/${encodedSymbol}`);
+      const metadata = await fetchJson(yahooUrl(`/v7/finance/options/${encodedSymbol}`));
       const optionRoot = metadata?.optionChain?.result?.[0] || {};
       const expirationUnixValues = Array.isArray(optionRoot.expirationDates) ? optionRoot.expirationDates : [];
       const expirations = expirationUnixValues
@@ -614,7 +646,7 @@ async function fetchOptionsChain(symbol, requestedDate) {
 
       let selectedRoot = optionRoot;
       if (selectedExpirationUnix !== null) {
-        const datedData = await fetchJson(`https://query1.finance.yahoo.com/v7/finance/options/${encodedSymbol}?date=${selectedExpirationUnix}`);
+        const datedData = await fetchJson(yahooUrl(`/v7/finance/options/${encodedSymbol}`, { date: selectedExpirationUnix }));
         selectedRoot = datedData?.optionChain?.result?.[0] || optionRoot;
       }
 
@@ -682,7 +714,7 @@ async function fetchYahooQuoteSummary(symbol) {
   return getOrFetch(cacheKey, METADATA_TTL_MS, async () => {
     try {
       const modules = 'price,summaryDetail,defaultKeyStatistics';
-      const data = await fetchJson(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(cleanedSymbol)}?modules=${modules}`);
+      const data = await fetchJson(yahooUrl(`/v10/finance/quoteSummary/${encodeURIComponent(cleanedSymbol)}`, { modules }));
       return data?.quoteSummary?.result?.[0] || null;
     } catch {
       return null;
