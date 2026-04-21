@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "z-app"
+version = "0.1.0"
+description = "Z-App Python library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Peter" }
+]
+dependencies = [
+  "z-framework>=0.1.0",
+  "z-quant-agent>=0.1.0",
+  "z-research-agent>=0.1.0",
+  "z-risk-management-agent>=0.1.0"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/z_app"]
+
+[tool.uv.sources]
+z-framework = { path = "../Z-Framework", editable = true }
+z-quant-agent = { path = "../Z-QuantAgent", editable = true }
+z-research-agent = { path = "../Z-ResearchAgent", editable = true }
+z-risk-management-agent = { path = "../Z-RiskManagementAgent", editable = true }

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "z-risk-management-agent"
+version = "0.1.0"
+description = "Z-RiskManagementAgent Python library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Peter" }
+]
+dependencies = [
+  "z-framework>=0.1.0",
+  "z-risk-management-agent>=0.1.0",
+  "yfinance"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/z_risk_management_agent"]
+
+[tool.uv.sources]
+z-framework = { path = "../Z-Framework", editable = true }

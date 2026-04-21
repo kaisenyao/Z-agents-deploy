@@ -1,0 +1,10 @@
+{
+    "dependencies": [
+        "langchain_openai",
+        "./src/z_risk_management_agent"
+    ],
+    "graphs": {
+        "risk_management_agent": "./src/z_risk_management_agent/agent.py:risk_management_agent"
+    },
+    "env": "./.env"
+}

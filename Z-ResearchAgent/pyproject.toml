@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "z-research-agent"
+version = "0.1.0"
+description = "Z-ResearchAgent Python library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Peter" }
+]
+dependencies = [
+  "z-framework>=0.1.0",
+  "langchain-community>=0.3.0",
+  "tavily-python>=0.5.0",
+  "defeatbeta-api>=0.0.24"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/z_research_agent"]
+
+[tool.uv.sources]
+z-framework = { path = "../Z-Framework", editable = true }

@@ -1,0 +1,20 @@
+{
+  "dependencies": [
+    "langchain_openai",
+    "./src/z_app"
+  ],
+  "graphs": {
+    "supervisor_no_doc": "./src/z_app/app.py:supervisor_graph_no_doc",
+    "committee_graph_no_doc": "./src/z_app/app.py:committee_graph_no_doc",
+    "report_supervisor_no_doc": "./src/z_app/app.py:report_graph_no_doc",
+    "supervisor": "./src/z_app/app.py:supervisor_graph",
+    "committee_graph": "./src/z_app/app.py:committee_graph",
+    "research_agent": "./src/z_app/app.py:research_agent",
+    "quant_agent": "./src/z_app/app.py:quant_agent",
+    "risk_management_agent": "./src/z_app/app.py:risk_management_agent",
+    "report_supervisor": "./src/z_app/app.py:report_graph",
+    "llm_only": "./src/z_app/app.py:llm_only_graph",
+    "llm_with_tools": "./src/z_app/app.py:llm_with_tools_graph"
+  },
+  "env": "./.env"
+}

@@ -1,0 +1,123 @@
+[
+  {
+    "id": "76765358-edd8-473a-baab-ed5b53f6bf67",
+    "first_name": "Kaisen",
+    "last_name": "Yao",
+    "email": "ky136@duke.edu",
+    "password_hash": "4c34caf6e9f087edfeb6501678d22275:ff395b97e3b50f925660aa82b8e654bbde0345f42aa3bda886cf2deaf2b6ae7781edfa72fea7c56fe7d1d89b35e6383eafb25965e837bb61726fa706a1a78621",
+    "status": "approved",
+    "role": "admin",
+    "created_at": "2026-03-24T05:40:57.205Z",
+    "updated_at": "2026-03-26T17:29:07.703Z"
+  },
+  {
+    "id": "9fe21768-e900-4bac-ad89-1f602b090c9f",
+    "first_name": "Michael",
+    "last_name": "Wu",
+    "email": "michael@clearpathagent.com",
+    "password_hash": "dd8d083316ccd1409363cc819b8a0acf:b7e6a299b7ee8980a3f15901b2010908ca9796a6d8448851dcdbe41b4ec8e9dac27942eb0d90d8cc374f96aa3ce1027ce62fe5972d9a90e4266a1ecd08644292",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-24T07:02:05.682Z",
+    "updated_at": "2026-03-25T00:31:16.547Z"
+  },
+  {
+    "id": "338ead68-c6c7-49c6-9624-9897fbf7829b",
+    "first_name": "Zixiao",
+    "last_name": "Zhou",
+    "email": "zixiao.tan@duke.edu",
+    "password_hash": "bddc72369a27cb463024f4f4a44f7163:2a87748a74b31d3090d930dcc6bb70367dd596ea8c44b87258ae3587adb6c4c0cb4ab2a60b1ade7bb06101aab6a2351aab3e0d8bd23ad8f0f7994b862befe58a",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-24T07:54:02.017Z",
+    "updated_at": "2026-03-25T00:31:17.038Z"
+  },
+  {
+    "id": "446da7ea-ed32-41c1-a473-1232734af2ae",
+    "first_name": "Ziyu",
+    "last_name": "Zhou",
+    "email": "zz401@duke.edu",
+    "password_hash": "17f08d97cdc7f21f9d9b71e2a0bef97d:00745178fcaff396b403b5f4ac59558f5d5cdd0f122fad366098889931294e2677ec50adf33d67f0a17094cc5382e579362bf53f1cef4933b0800c2e272409bb",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-24T07:55:28.301Z",
+    "updated_at": "2026-03-26T17:28:17.010Z"
+  },
+  {
+    "id": "cc240632-91de-4330-8030-e8d90ec98478",
+    "first_name": "Eleanor",
+    "last_name": "Jiang",
+    "email": "eleanor.jiang@duke.edu",
+    "password_hash": "0efa9e97054f27321dfabb4b2b08dfe4:2bdd01e2452ea3859bd26d295e848681f015bdda3daa378175006eeaa75ba7c747a9704e49af305027aece7d7a1d2c2165a2c3550b6fa73c733b038a0afd0cf1",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-24T19:50:12.815Z",
+    "updated_at": "2026-03-26T17:30:00.882Z"
+  },
+  {
+    "id": "f9a89b78-7a00-4614-b268-b2821204a4b4",
+    "first_name": "Chao Peter",
+    "last_name": "Yang",
+    "email": "chaopeter.yang@gmail.com",
+    "password_hash": "162e199e4b86c591ae040dc2b512fa5d:8d1dc6c8180639ef88217a6126c4bdec55cb554692302147ddf10dd6fbe89ba1b8f3631f1448d239e884c747bb51e41e78640e58776eda8a962a54105339d959",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-25T00:28:33.325Z",
+    "updated_at": "2026-03-26T17:28:29.746Z"
+  },
+  {
+    "id": "8220da20-b24f-41d8-bd1d-3e20f4a0b74f",
+    "first_name": "Junhan",
+    "last_name": "Wen",
+    "email": "wenjunhan_hx@hotmail.com",
+    "password_hash": "90bbea44a614bb3300ba485fec94aa4c:e5a9655b67f2d5dc45509002fc2d6c78613a2592074e25fa64b8d7d79302f8da882d428efe5537f05d1398ad75b515bf07b55fb6361cb298062b63d48a7e5f98",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-25T01:10:01.986Z",
+    "updated_at": "2026-03-26T17:28:30.148Z"
+  },
+  {
+    "id": "0d78e4bb-d7ad-456d-8bdf-4157ee7a6036",
+    "first_name": "Jason",
+    "last_name": "Huang",
+    "email": "jshdev26@gmail.com",
+    "password_hash": "07eda72e0ba50d6668f00018b2b7ca82:88b336ccccfc9aaf4199070b7630b298916e0795c2c896e60bdfd4ef690ec3f59736ca9e253159dc2f78bfaa1cdc3448e337c428b7d075f657a7061bf2e822ab",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-25T01:26:17.637Z",
+    "updated_at": "2026-03-27T14:27:47.034Z"
+  },
+  {
+    "id": "adfe1357-8cf2-4a4c-8087-32440a6113be",
+    "first_name": "Nathan",
+    "last_name": "Bush",
+    "email": "nab42@duke.edu",
+    "password_hash": "0eb4ca72c240adc991178af56e95d6ad:3a9fbf1853384e4b01980088f81a49519df2cda5302238f2939b63052d99b5c0879ad97eed6fdccf1397a8058140e2aa8ad0b796fdfc315be8bc328ab998e68d",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-27T15:49:38.931Z",
+    "updated_at": "2026-03-27T15:49:38.931Z"
+  },
+  {
+    "id": "e6bff0e0-3bf4-4cf1-ac97-49a1f9b8ef4c",
+    "first_name": "Jay",
+    "last_name": "Wu",
+    "email": "jaywu05120512@gmail.com",
+    "password_hash": "d55e9c6d78b8c4b65f645becdd721543:6b2821dc44b683c13bebd0e9b2c085e848bd80e48b2c9ec9f9eb78b7a78d40102cf9de93d4000f367893f141dec1473b8a37f62d21790ac27e77687a009e3c5d",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-03-27T16:15:16.297Z",
+    "updated_at": "2026-03-27T16:15:16.297Z"
+  },
+  {
+    "id": "53f05590-9a2a-4599-8cfa-5efb84a34e96",
+    "first_name": "Ammy",
+    "last_name": "Lin",
+    "email": "ammy.lin@duke.edu",
+    "password_hash": "48b6186ed3c5b2b72634c822a5f313a3:65e1c4ea34dc2f8c6df7b8739581b08c5e2c2ccc60672cd8d072d95877373c099b386d9562d78ede256602ccb9ff03cc9f584245e81cd836618c3336d2faaca8",
+    "status": "approved",
+    "role": "user",
+    "created_at": "2026-04-08T01:38:05.000Z",
+    "updated_at": "2026-04-08T01:38:05.000Z"
+  }
+]

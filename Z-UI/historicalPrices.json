@@ -1,0 +1,38 @@
+[
+  {
+    "symbol": "NVDA",
+    "purchaseDate": "2023-03-14",
+    "purchasePrice": 24.062999725341797,
+    "currentPrice": 177.19
+  },
+  {
+    "symbol": "AAPL",
+    "purchaseDate": "2023-09-21",
+    "purchasePrice": 173.92999267578125,
+    "currentPrice": 264.18
+  },
+  {
+    "symbol": "GOOGL",
+    "purchaseDate": "2023-06-09",
+    "purchasePrice": 122.2300033569336,
+    "currentPrice": 311.76
+  },
+  {
+    "symbol": "TSLA",
+    "purchaseDate": "2023-11-04",
+    "purchasePrice": null,
+    "currentPrice": 402.51
+  },
+  {
+    "symbol": "SPY",
+    "purchaseDate": "2016-03-15",
+    "purchasePrice": 202.1699981689453,
+    "currentPrice": 685.99
+  },
+  {
+    "symbol": "QQQ",
+    "purchaseDate": "2017-07-22",
+    "purchasePrice": null,
+    "currentPrice": 607.29
+  }
+]

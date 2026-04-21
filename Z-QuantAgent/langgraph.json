@@ -1,0 +1,10 @@
+{
+    "dependencies": [
+        "langchain_openai",
+        "./src/z_quant_agent"
+    ],
+    "graphs": {
+        "quant_agent": "./src/z_quant_agent/agent.py:quant_agent"
+    },
+    "env": "./.env"
+}

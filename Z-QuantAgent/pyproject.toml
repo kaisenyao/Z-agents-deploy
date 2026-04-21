@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "z-quant-agent"
+version = "0.1.0"
+description = "Z-QuantAgent Python library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Peter" }
+]
+dependencies = [
+  "z-framework>=0.1.0",
+  "z-quant-agent>=0.1.0",
+  "yfinance",
+  "alpha_vantage",
+  "matplotlib",
+  "mplfinance"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/z_quant_agent"]
+
+[tool.uv.sources]
+z-framework = { path = "../Z-Framework", editable = true }

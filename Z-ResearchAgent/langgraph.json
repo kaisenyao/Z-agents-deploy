@@ -1,0 +1,11 @@
+
+{
+    "dependencies": [
+        "langchain_openai",
+        "./src/z_research_agent"
+    ],
+    "graphs": {
+        "research_agent": "./src/z_research_agent/agent.py:research_agent"
+    },
+    "env": "./.env"
+}
