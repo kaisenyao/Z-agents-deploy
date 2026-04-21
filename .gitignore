@@ -1,7 +1,15 @@
-.env
-.env.*
+# mac
 .DS_Store
-.langgraph_api/
+
+# python
 __pycache__/
 *.pyc
+.env
+.env.*
+
+# langgraph runtime
+.langgraph_api/
+
+# node
 node_modules/
+dist/
