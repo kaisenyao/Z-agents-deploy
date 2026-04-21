@@ -6,6 +6,7 @@ const QUOTE_TTL_MS = Number(process.env.MARKET_QUOTE_TTL_MS || 15_000);
 const CHART_TTL_MS = Number(process.env.MARKET_CHART_TTL_MS || 60_000);
 const METADATA_TTL_MS = Number(process.env.MARKET_METADATA_TTL_MS || 1_800_000);
 const SCREENER_TTL_MS = Number(process.env.MARKET_SCREENER_TTL_MS || 300_000);
+const OPTIONS_TTL_MS = Number(process.env.MARKET_OPTIONS_TTL_MS || 60_000);
 const YAHOO_TIMEOUT_MS = Number(process.env.YAHOO_TIMEOUT_MS || 15_000);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -53,6 +54,15 @@ function getNumericValue(value) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+function nullableNumber(value) {
+  const numeric = getNumericValue(value);
+  return Number.isFinite(numeric) && numeric !== 0 ? numeric : null;
+}
+
+function nullableBoolean(value) {
+  return typeof value === 'boolean' ? value : null;
 }
 
 function formatCompactNumber(value) {
@@ -233,6 +243,107 @@ function toUnixSeconds(date, { endOfDay = false } = {}) {
   return Math.floor(parsed.getTime() / 1000);
 }
 
+function normalizeExpirationDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    const timestamp = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+    const date = new Date(timestamp);
+    return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null;
+  }
+
+  const date = new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null;
+}
+
+function expirationDateToUnix(date) {
+  const normalized = normalizeExpirationDate(date);
+  if (!normalized) return null;
+  return Math.floor(new Date(`${normalized}T00:00:00.000Z`).getTime() / 1000);
+}
+
+function nextFridayDates(count = 8) {
+  const dates = [];
+  const cursor = new Date();
+  cursor.setUTCHours(0, 0, 0, 0);
+  const daysUntilFriday = (5 - cursor.getUTCDay() + 7) % 7 || 7;
+  cursor.setUTCDate(cursor.getUTCDate() + daysUntilFriday);
+
+  while (dates.length < count) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+
+  return dates;
+}
+
+function buildOptionContractSymbol(symbol, expiration, type, strike) {
+  const yymmdd = expiration.replace(/-/g, '').slice(2);
+  const typeCode = type === 'put' ? 'P' : 'C';
+  const strikeCode = String(Math.round(strike * 1000)).padStart(8, '0');
+  return `${symbol}${yymmdd}${typeCode}${strikeCode}`;
+}
+
+function buildSyntheticOptionRows(symbol, expiration, underlyingPrice, type) {
+  if (!Number.isFinite(underlyingPrice) || underlyingPrice <= 0) return [];
+
+  const rawStep = underlyingPrice < 50 ? 2.5 : underlyingPrice < 200 ? 5 : 10;
+  const centerStrike = Math.round(underlyingPrice / rawStep) * rawStep;
+  const strikes = Array.from({ length: 11 }, (_, index) => Number((centerStrike + (index - 5) * rawStep).toFixed(2)))
+    .filter((strike) => strike > 0);
+
+  return strikes.map((strike) => {
+    const intrinsic = type === 'call'
+      ? Math.max(underlyingPrice - strike, 0)
+      : Math.max(strike - underlyingPrice, 0);
+
+    return {
+      contractSymbol: buildOptionContractSymbol(symbol, expiration, type, strike),
+      strike,
+      lastPrice: Number((intrinsic || Math.max(underlyingPrice * 0.015, rawStep * 0.1)).toFixed(2)),
+      bid: null,
+      ask: null,
+      change: null,
+      percentChange: null,
+      volume: null,
+      openInterest: null,
+      impliedVolatility: null,
+      inTheMoney: type === 'call' ? strike < underlyingPrice : strike > underlyingPrice,
+      expiration,
+      currency: 'USD',
+    };
+  });
+}
+
+async function buildSyntheticOptionsChain(symbol, requestedDate) {
+  const cleanedSymbol = normalizeSymbol(symbol);
+  const expirations = nextFridayDates();
+  const selectedExpiration = normalizeExpirationDate(requestedDate) || expirations[0] || null;
+  const quote = await fetchYahooChartQuote(cleanedSymbol);
+  const underlyingPrice = nullableNumber(quote?.regularMarketPrice);
+
+  return {
+    symbol: cleanedSymbol,
+    underlyingSymbol: cleanedSymbol,
+    underlyingPrice,
+    expirations,
+    expirationDates: expirations,
+    selectedExpiration,
+    quote: quote || {},
+    calls: selectedExpiration && underlyingPrice
+      ? buildSyntheticOptionRows(cleanedSymbol, selectedExpiration, underlyingPrice, 'call')
+      : [],
+    puts: selectedExpiration && underlyingPrice
+      ? buildSyntheticOptionRows(cleanedSymbol, selectedExpiration, underlyingPrice, 'put')
+      : [],
+    diagnostics: {
+      fallback: true,
+      reason: 'Yahoo options chain unavailable; generated display-only derived chain from underlying price.',
+    },
+  };
+}
+
 async function fetchYahooChart(symbol, request) {
   const cleanedSymbol = normalizeSymbol(symbol);
   if (!cleanedSymbol) return null;
@@ -277,6 +388,98 @@ async function fetchYahooSearch(query) {
     });
     const data = await fetchJson(`https://query1.finance.yahoo.com/v1/finance/search?${params.toString()}`);
     return Array.isArray(data?.quotes) ? data.quotes.filter((quote) => quote?.symbol) : [];
+  });
+}
+
+function normalizeOptionContract(contract, fallbackExpiration, currency) {
+  const expiration = normalizeExpirationDate(
+    contract?.expiration ??
+    contract?.expirationDate ??
+    fallbackExpiration,
+  );
+
+  return {
+    contractSymbol: String(contract?.contractSymbol || contract?.symbol || '').trim().toUpperCase(),
+    strike: nullableNumber(contract?.strike),
+    lastPrice: nullableNumber(contract?.lastPrice ?? contract?.regularMarketPrice),
+    bid: contract?.bid === null || contract?.bid === undefined ? null : nullableNumber(contract.bid),
+    ask: contract?.ask === null || contract?.ask === undefined ? null : nullableNumber(contract.ask),
+    change: contract?.change === null || contract?.change === undefined
+      ? null
+      : getNumericValue(contract.change),
+    percentChange: contract?.percentChange === null || contract?.percentChange === undefined
+      ? null
+      : getNumericValue(contract.percentChange),
+    volume: contract?.volume === null || contract?.volume === undefined
+      ? null
+      : nullableNumber(contract.volume),
+    openInterest: contract?.openInterest === null || contract?.openInterest === undefined
+      ? null
+      : nullableNumber(contract.openInterest),
+    impliedVolatility: contract?.impliedVolatility === null || contract?.impliedVolatility === undefined
+      ? null
+      : getNumericValue(contract.impliedVolatility),
+    inTheMoney: nullableBoolean(contract?.inTheMoney),
+    expiration,
+    currency: contract?.currency || currency || null,
+  };
+}
+
+async function fetchOptionsChain(symbol, requestedDate) {
+  const cleanedSymbol = normalizeSymbol(symbol);
+  if (!cleanedSymbol) {
+    const error = new Error('Missing required query parameter: symbol');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const requestedExpiration = normalizeExpirationDate(requestedDate);
+  const cacheKey = `options:${cleanedSymbol}:${requestedExpiration || 'nearest'}`;
+
+  return getOrFetch(cacheKey, OPTIONS_TTL_MS, async () => {
+    try {
+      const encodedSymbol = encodeURIComponent(cleanedSymbol);
+      const metadata = await fetchJson(`https://query1.finance.yahoo.com/v7/finance/options/${encodedSymbol}`);
+      const optionRoot = metadata?.optionChain?.result?.[0] || {};
+      const expirationUnixValues = Array.isArray(optionRoot.expirationDates) ? optionRoot.expirationDates : [];
+      const expirations = expirationUnixValues
+        .map((expiration) => normalizeExpirationDate(expiration))
+        .filter(Boolean);
+      const selectedExpiration = requestedExpiration || expirations[0] || null;
+      const selectedExpirationUnix = expirationDateToUnix(selectedExpiration);
+
+      let selectedRoot = optionRoot;
+      if (selectedExpirationUnix !== null) {
+        const datedData = await fetchJson(`https://query1.finance.yahoo.com/v7/finance/options/${encodedSymbol}?date=${selectedExpirationUnix}`);
+        selectedRoot = datedData?.optionChain?.result?.[0] || optionRoot;
+      }
+
+      const selectedOptionSet = Array.isArray(selectedRoot.options) ? selectedRoot.options[0] : null;
+      const quote = selectedRoot.quote || optionRoot.quote || {};
+      const currency = quote.currency || selectedRoot.underlyingCurrency || null;
+
+      return {
+        symbol: cleanedSymbol,
+        underlyingSymbol: selectedRoot.underlyingSymbol || optionRoot.underlyingSymbol || cleanedSymbol,
+        underlyingPrice: nullableNumber(
+          quote.regularMarketPrice ??
+          quote.postMarketPrice ??
+          quote.preMarketPrice,
+        ),
+        expirations,
+        expirationDates: expirations,
+        selectedExpiration,
+        quote,
+        calls: Array.isArray(selectedOptionSet?.calls)
+          ? selectedOptionSet.calls.map((contract) => normalizeOptionContract(contract, selectedExpiration, currency))
+          : [],
+        puts: Array.isArray(selectedOptionSet?.puts)
+          ? selectedOptionSet.puts.map((contract) => normalizeOptionContract(contract, selectedExpiration, currency))
+          : [],
+      };
+    } catch {
+      return buildSyntheticOptionsChain(cleanedSymbol, requestedExpiration);
+    }
   });
 }
 
@@ -531,6 +734,17 @@ async function handleRequest(req, res) {
         return;
       }
       sendJson(res, 200, await fetchMetadata(symbol));
+      return;
+    }
+
+    if (url.pathname === '/market/options') {
+      const symbol = normalizeSymbol(url.searchParams.get('symbol'));
+      const date = String(url.searchParams.get('date') || '').trim();
+      if (!symbol) {
+        sendJson(res, 400, { error: 'Missing required query parameter: symbol' });
+        return;
+      }
+      sendJson(res, 200, await fetchOptionsChain(symbol, date));
       return;
     }
 
