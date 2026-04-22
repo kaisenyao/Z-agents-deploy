@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node src/server.js"
+    "dev": "node src/server.js",
+    "seed:screeners": "node scripts/seed-market-screener-cache.js"
   },
   "dependencies": {
     "pg": "^8.20.0",
