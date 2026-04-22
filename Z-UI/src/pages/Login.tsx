@@ -4,12 +4,11 @@ import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
 
 export function Login() {
-  const { loading, session, signIn, signUp } = useAuth();
+  const { loading, session, signIn } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -21,7 +20,6 @@ export function Login() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    setMessage('');
 
     const normalized = email.toLowerCase().trim();
     if (!normalized) {
@@ -41,38 +39,6 @@ export function Login() {
     try {
       await signIn(normalized, password);
       navigate('/chat', { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSignup = async () => {
-    setError('');
-    setMessage('');
-    const normalized = email.toLowerCase().trim();
-    if (!normalized) {
-      setError('Enter an email address.');
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
-      setError('Enter a valid email address.');
-      return;
-    }
-    if (!password) {
-      setError('Enter your password.');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const data = await signUp(normalized, password);
-      if (data.session) {
-        navigate('/chat', { replace: true });
-        return;
-      }
-      setMessage('Check your email to confirm your account, then sign in.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
@@ -114,9 +80,6 @@ export function Login() {
               {error && (
                 <p className="mt-2 text-sm text-red-400">{error}</p>
               )}
-              {message && (
-                <p className="mt-2 text-sm text-emerald-400">{message}</p>
-              )}
             </div>
 
             <button
@@ -130,7 +93,7 @@ export function Login() {
             <button
               type="button"
               disabled={submitting}
-              onClick={handleSignup}
+              onClick={() => navigate('/signup')}
               className="w-full px-5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed text-slate-100 text-sm font-medium rounded-lg transition-colors"
             >
               Sign up
