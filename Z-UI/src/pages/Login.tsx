@@ -1,5 +1,5 @@
 import { useEffect, useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
 
@@ -90,14 +90,14 @@ export function Login() {
               {submitting ? 'Signing in…' : 'Sign in'}
             </button>
 
-            <Link
-              to="/signup"
+            <a
+              href="/signup"
               className={`block text-center w-full px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-medium rounded-lg transition-colors ${
                 submitting ? 'opacity-60 pointer-events-none' : ''
               }`}
             >
               Sign up
-            </Link>
+            </a>
           </form>
         </div>
       </div>
