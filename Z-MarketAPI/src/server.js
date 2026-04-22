@@ -1,5 +1,6 @@
 const http = require('node:http');
 const { Pool } = require('pg');
+const YahooFinance = require('yahoo-finance2').default;
 
 const PORT = Number(process.env.PORT || 8787);
 const DEFAULT_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS || 30_000);
@@ -21,6 +22,7 @@ const DATABASE_HOST = DATABASE_URL ? new URL(DATABASE_URL).hostname : '';
 
 const cache = new Map();
 const screenerRefreshInFlight = new Map();
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 const dbPool = DATABASE_URL
   ? new Pool({
       connectionString: DATABASE_URL,
@@ -438,6 +440,20 @@ function expirationDateToUnix(date) {
   return Math.floor(new Date(`${normalized}T00:00:00.000Z`).getTime() / 1000);
 }
 
+function normalizeDateTime(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const timestamp = value < 1_000_000_000_000 ? value * 1000 : value;
+    const date = new Date(timestamp);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  }
+  const date = new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : value;
+}
+
 function nextFridayDates(count = 8) {
   const dates = [];
   const cursor = new Date();
@@ -609,6 +625,7 @@ function normalizeOptionContract(contract, fallbackExpiration, currency) {
 
   return {
     contractSymbol: String(contract?.contractSymbol || contract?.symbol || '').trim().toUpperCase(),
+    lastTradeDate: normalizeDateTime(contract?.lastTradeDate),
     strike: nullableNumber(contract?.strike),
     lastPrice: nullableNumber(contract?.lastPrice ?? contract?.regularMarketPrice),
     bid: contract?.bid === null || contract?.bid === undefined ? null : nullableNumber(contract.bid),
@@ -634,6 +651,40 @@ function normalizeOptionContract(contract, fallbackExpiration, currency) {
   };
 }
 
+function normalizeYahooFinanceOptionsChain(data, cleanedSymbol, requestedExpiration) {
+  const expirations = Array.isArray(data?.expirationDates)
+    ? data.expirationDates.map((expiration) => normalizeExpirationDate(expiration)).filter(Boolean)
+    : [];
+  const optionSet = Array.isArray(data?.options) ? data.options[0] : null;
+  const selectedExpiration = requestedExpiration || expirations[0] || null;
+  const quote = data?.quote || {};
+  const currency = quote.currency || data?.underlyingCurrency || null;
+
+  return {
+    symbol: cleanedSymbol,
+    underlyingSymbol: data?.underlyingSymbol || cleanedSymbol,
+    underlyingPrice: nullableNumber(
+      quote.regularMarketPrice ??
+      quote.postMarketPrice ??
+      quote.preMarketPrice,
+    ),
+    expirations,
+    expirationDates: expirations,
+    selectedExpiration,
+    quote,
+    calls: Array.isArray(optionSet?.calls)
+      ? optionSet.calls.map((contract) => normalizeOptionContract(contract, selectedExpiration, currency))
+      : [],
+    puts: Array.isArray(optionSet?.puts)
+      ? optionSet.puts.map((contract) => normalizeOptionContract(contract, selectedExpiration, currency))
+      : [],
+    diagnostics: {
+      provider: 'yahoo-finance2',
+      fallback: false,
+    },
+  };
+}
+
 async function fetchOptionsChain(symbol, requestedDate) {
   const cleanedSymbol = normalizeSymbol(symbol);
   if (!cleanedSymbol) {
@@ -647,46 +698,12 @@ async function fetchOptionsChain(symbol, requestedDate) {
 
   return getOrFetch(cacheKey, OPTIONS_TTL_MS, async () => {
     try {
-      const encodedSymbol = encodeURIComponent(cleanedSymbol);
-      const metadata = await fetchJson(yahooUrl(`/v7/finance/options/${encodedSymbol}`));
-      const optionRoot = metadata?.optionChain?.result?.[0] || {};
-      const expirationUnixValues = Array.isArray(optionRoot.expirationDates) ? optionRoot.expirationDates : [];
-      const expirations = expirationUnixValues
-        .map((expiration) => normalizeExpirationDate(expiration))
-        .filter(Boolean);
-      const selectedExpiration = requestedExpiration || expirations[0] || null;
-      const selectedExpirationUnix = expirationDateToUnix(selectedExpiration);
-
-      let selectedRoot = optionRoot;
-      if (selectedExpirationUnix !== null) {
-        const datedData = await fetchJson(yahooUrl(`/v7/finance/options/${encodedSymbol}`, { date: selectedExpirationUnix }));
-        selectedRoot = datedData?.optionChain?.result?.[0] || optionRoot;
-      }
-
-      const selectedOptionSet = Array.isArray(selectedRoot.options) ? selectedRoot.options[0] : null;
-      const quote = selectedRoot.quote || optionRoot.quote || {};
-      const currency = quote.currency || selectedRoot.underlyingCurrency || null;
-
-      return {
-        symbol: cleanedSymbol,
-        underlyingSymbol: selectedRoot.underlyingSymbol || optionRoot.underlyingSymbol || cleanedSymbol,
-        underlyingPrice: nullableNumber(
-          quote.regularMarketPrice ??
-          quote.postMarketPrice ??
-          quote.preMarketPrice,
-        ),
-        expirations,
-        expirationDates: expirations,
-        selectedExpiration,
-        quote,
-        calls: Array.isArray(selectedOptionSet?.calls)
-          ? selectedOptionSet.calls.map((contract) => normalizeOptionContract(contract, selectedExpiration, currency))
-          : [],
-        puts: Array.isArray(selectedOptionSet?.puts)
-          ? selectedOptionSet.puts.map((contract) => normalizeOptionContract(contract, selectedExpiration, currency))
-          : [],
-      };
-    } catch {
+      const queryOptions = requestedExpiration ? { date: new Date(`${requestedExpiration}T00:00:00.000Z`) } : undefined;
+      const data = await yahooFinance.options(cleanedSymbol, queryOptions);
+      return normalizeYahooFinanceOptionsChain(data, cleanedSymbol, requestedExpiration);
+    } catch (error) {
+      console.warn(`[Options provider] yahoo-finance2 failed for ${cleanedSymbol}: ${error?.message || 'Unknown error'}`);
+      console.warn(`[Options provider] using synthetic fallback for ${cleanedSymbol}`);
       return buildSyntheticOptionsChain(cleanedSymbol, requestedExpiration);
     }
   });
