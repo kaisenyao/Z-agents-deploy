@@ -212,6 +212,11 @@ function getCache(key) {
   return entry.value;
 }
 
+function getCachedValue(key) {
+  const entry = cache.get(key);
+  return entry ? entry.value : null;
+}
+
 function setCache(key, value, ttlMs = DEFAULT_CACHE_TTL_MS) {
   cache.set(key, {
     value,
@@ -420,6 +425,50 @@ function toUnixSeconds(date, { endOfDay = false } = {}) {
   return Math.floor(parsed.getTime() / 1000);
 }
 
+function isUsableChart(chart) {
+  const timestamps = Array.isArray(chart?.timestamp) ? chart.timestamp : [];
+  const quote = chart?.indicators?.quote?.[0] || {};
+  const closes = Array.isArray(quote.close) ? quote.close : [];
+  return timestamps.length > 0 && closes.some((value) => Number.isFinite(value));
+}
+
+function buildFallbackChart(symbol, request, price, reason) {
+  const fallbackPrice = Number.isFinite(price) && price > 0 ? price : 0.01;
+  const now = Math.floor(Date.now() / 1000);
+  const timestamp = [now - 86_400, now];
+  const values = [fallbackPrice, fallbackPrice];
+
+  return {
+    meta: {
+      currency: 'USD',
+      symbol,
+      exchangeName: 'fallback',
+      instrumentType: 'EQUITY',
+      regularMarketPrice: fallbackPrice,
+      chartPreviousClose: fallbackPrice,
+      previousClose: fallbackPrice,
+      dataGranularity: request.interval || '1d',
+      range: request.range || '1mo',
+      validRanges: ['1d', '5d', '1mo', '6mo', '1y', '5y'],
+      fallback: true,
+      fallbackReason: reason,
+    },
+    timestamp,
+    indicators: {
+      quote: [{
+        open: values,
+        high: values,
+        low: values,
+        close: values,
+        volume: [0, 0],
+      }],
+      adjclose: [{
+        adjclose: values,
+      }],
+    },
+  };
+}
+
 function normalizeExpirationDate(value) {
   if (value === null || value === undefined || value === '') return null;
 
@@ -540,30 +589,50 @@ async function fetchYahooChart(symbol, request) {
   if (!cleanedSymbol) return null;
 
   const cacheKey = `chart:${JSON.stringify({ symbol: cleanedSymbol, ...request })}`;
-  return getOrFetch(cacheKey, CHART_TTL_MS, async () => {
-    const encodedSymbol = encodeURIComponent(cleanedSymbol);
-    const params = {
-      interval: request.interval || '1d',
-      includePrePost: 'false',
-      events: 'div,splits',
-    };
+  const staleChart = getCachedValue(cacheKey);
 
-    if (Number.isFinite(request.period1) && Number.isFinite(request.period2)) {
-      params.period1 = String(Math.floor(request.period1));
-      params.period2 = String(Math.floor(request.period2));
-    } else if (request.startDate && request.endDate) {
-      const start = toUnixSeconds(request.startDate);
-      const end = toUnixSeconds(request.endDate, { endOfDay: true });
-      if (start === null || end === null || end <= start) return null;
-      params.period1 = String(start);
-      params.period2 = String(end);
-    } else {
-      params.range = request.range || '1mo';
+  try {
+    return await getOrFetch(cacheKey, CHART_TTL_MS, async () => {
+      const encodedSymbol = encodeURIComponent(cleanedSymbol);
+      const params = {
+        interval: request.interval || '1d',
+        includePrePost: 'false',
+        events: 'div,splits',
+      };
+
+      if (Number.isFinite(request.period1) && Number.isFinite(request.period2)) {
+        params.period1 = String(Math.floor(request.period1));
+        params.period2 = String(Math.floor(request.period2));
+      } else if (request.startDate && request.endDate) {
+        const start = toUnixSeconds(request.startDate);
+        const end = toUnixSeconds(request.endDate, { endOfDay: true });
+        if (start === null || end === null || end <= start) {
+          throw new Error(`Invalid chart date range for ${cleanedSymbol}`);
+        }
+        params.period1 = String(start);
+        params.period2 = String(end);
+      } else {
+        params.range = request.range || '1mo';
+      }
+
+      const data = await fetchJson(yahooUrl(`/v8/finance/chart/${encodedSymbol}`, params));
+      const chart = data?.chart?.result?.[0] || null;
+      if (!isUsableChart(chart)) {
+        throw new Error(`Yahoo chart returned no usable price data for ${cleanedSymbol}`);
+      }
+      return chart;
+    });
+  } catch (error) {
+    if (isUsableChart(staleChart)) {
+      console.warn(`[Chart provider] using stale chart cache for ${cleanedSymbol}: ${error?.message || 'Unknown error'}`);
+      return staleChart;
     }
 
-    const data = await fetchJson(yahooUrl(`/v8/finance/chart/${encodedSymbol}`, params));
-    return data?.chart?.result?.[0] || null;
-  });
+    const fallbackRow = await findScreenerFallback(cleanedSymbol).catch(() => null);
+    const fallbackPrice = nullableNumber(fallbackRow?.price);
+    console.warn(`[Chart provider] using fallback chart for ${cleanedSymbol}: ${error?.message || 'Unknown error'}`);
+    return buildFallbackChart(cleanedSymbol, request, fallbackPrice, error?.message || 'Yahoo chart unavailable');
+  }
 }
 
 async function fetchYahooSearch(query) {
