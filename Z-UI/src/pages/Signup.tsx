@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
@@ -42,7 +42,7 @@ function validateForm(data: FormState): FormErrors {
 }
 
 export function Signup() {
-  const { signUp } = useAuth();
+  const { loading, session, signUp } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>({
     firstName: '',
@@ -54,6 +54,12 @@ export function Signup() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!loading && session) {
+      navigate('/chat', { replace: true });
+    }
+  }, [loading, navigate, session]);
 
   const setField = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -70,9 +76,17 @@ export function Signup() {
 
     setSubmitting(true);
     try {
-      await signUp(form.email.toLowerCase().trim(), form.password);
+      const data = await signUp(form.email.toLowerCase().trim(), form.password, {
+        data: {
+          first_name: form.firstName.trim(),
+          last_name: form.lastName.trim(),
+        },
+      });
+      if (data.session) {
+        navigate('/chat', { replace: true });
+        return;
+      }
       setSuccess(true);
-      navigate('/chat', { replace: true });
     } catch (err) {
       setErrors({ email: err instanceof Error ? err.message : 'Something went wrong. Please try again.' });
     } finally {
@@ -94,7 +108,7 @@ export function Signup() {
           {success ? (
             <div className="space-y-4">
               <p className="text-sm text-slate-300 leading-relaxed">
-                Thanks for your request — we&apos;ll get back to you soon.
+                Check your email to confirm your account, then sign in.
               </p>
               <Link
                 to="/login"

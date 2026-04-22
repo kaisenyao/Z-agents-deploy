@@ -1,19 +1,27 @@
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../context/SupabaseAuthContext';
 import logo from '../logo.png';
 
 export function Login() {
-  const { signIn, signUp } = useAuth();
+  const { loading, session, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!loading && session) {
+      navigate('/chat', { replace: true });
+    }
+  }, [loading, navigate, session]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setMessage('');
 
     const normalized = email.toLowerCase().trim();
     if (!normalized) {
@@ -42,16 +50,29 @@ export function Login() {
 
   const handleSignup = async () => {
     setError('');
+    setMessage('');
     const normalized = email.toLowerCase().trim();
-    if (!normalized || !password) {
-      setError('Enter an email address and password.');
+    if (!normalized) {
+      setError('Enter an email address.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (!password) {
+      setError('Enter your password.');
       return;
     }
 
     setSubmitting(true);
     try {
-      await signUp(normalized, password);
-      navigate('/chat', { replace: true });
+      const data = await signUp(normalized, password);
+      if (data.session) {
+        navigate('/chat', { replace: true });
+        return;
+      }
+      setMessage('Check your email to confirm your account, then sign in.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
@@ -92,6 +113,9 @@ export function Login() {
               />
               {error && (
                 <p className="mt-2 text-sm text-red-400">{error}</p>
+              )}
+              {message && (
+                <p className="mt-2 text-sm text-emerald-400">{message}</p>
               )}
             </div>
 

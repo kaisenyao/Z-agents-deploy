@@ -1,13 +1,17 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
+import type { AuthResponse, Session, SignUpWithPasswordCredentials, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
 interface SupabaseAuthContextValue {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<AuthResponse['data']>;
+  signUp: (
+    email: string,
+    password: string,
+    options?: SignUpWithPasswordCredentials extends { options?: infer Options } ? Options : never,
+  ) => Promise<AuthResponse['data']>;
   signOut: () => Promise<void>;
 }
 
@@ -42,12 +46,14 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     session,
     loading,
     signIn: async (email: string, password: string) => {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      return data;
     },
-    signUp: async (email: string, password: string) => {
-      const { error } = await supabase.auth.signUp({ email, password });
+    signUp: async (email: string, password: string, options) => {
+      const { data, error } = await supabase.auth.signUp({ email, password, options });
       if (error) throw error;
+      return data;
     },
     signOut: async () => {
       const { error } = await supabase.auth.signOut();
