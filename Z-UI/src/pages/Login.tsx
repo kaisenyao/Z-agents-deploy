@@ -13,7 +13,7 @@ export function Login() {
 
   useEffect(() => {
     if (!loading && session) {
-      navigate('/chat', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   }, [loading, navigate, session]);
 
@@ -38,7 +38,7 @@ export function Login() {
     setSubmitting(true);
     try {
       await signIn(normalized, password);
-      navigate('/chat', { replace: true });
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {

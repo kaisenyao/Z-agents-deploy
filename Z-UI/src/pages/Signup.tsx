@@ -57,7 +57,7 @@ export function Signup() {
 
   useEffect(() => {
     if (!loading && session) {
-      navigate('/chat', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   }, [loading, navigate, session]);
 
@@ -83,7 +83,7 @@ export function Signup() {
         },
       });
       if (data.session) {
-        navigate('/chat', { replace: true });
+        navigate('/dashboard', { replace: true });
         return;
       }
       setSuccess(true);
